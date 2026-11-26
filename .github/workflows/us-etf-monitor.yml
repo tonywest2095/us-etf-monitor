@@ -1,0 +1,60 @@
+name: 美股 ETF 日报
+
+on:
+  schedule:            # GitHub 只认 UTC；冬令时、夏令时两套都排上，程序按美东时间自己判断该不该跑
+    - cron: "30 14 * * 1-5"   # 盘中：夏令时 10:30 ET（北京 22:30）；冬令时 09:30 ET 会被跳过
+    - cron: "30 15 * * 1-5"   # 盘中：冬令时 10:30 ET（北京 23:30）；夏令时 11:30 ET，同日已出过就跳过
+    - cron: "30 20 * * 1-5"   # 收盘：夏令时 16:30 ET（北京 04:30）；冬令时 15:30 ET 未收盘，跳过
+    - cron: "30 21 * * 1-5"   # 收盘：冬令时 16:30 ET（北京 05:30）
+    - cron: "30 22 * * 1-5"   # 收盘兜底：数据源晚更新或前一次被 GitHub 延误时补跑
+    - cron: "0 12 * * 2-6"    # 次日开盘前兜底：前一晚都失败时补出收盘报告（已出过就跳过）
+    - cron: "17 23 1 * *"   # 每月 1 号：池子体检（ETF 层面的优胜劣汰）
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "auto / mid / close"
+        default: "auto"
+      force:
+        description: "不在时段内或已出过也生成（填 yes）"
+        default: "no"
+      audit:
+        description: "顺便跑池子体检（填 yes）"
+        default: "no"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: us-etf-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 池子体检
+        if: github.event.schedule == '17 23 1 * *' || github.event.inputs.audit == 'yes'
+        run: python -m us_etf_monitor.pool_audit --out docs
+      - name: 生成报告
+        if: github.event.schedule != '17 23 1 * *'
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          TIINGO_KEY: ${{ secrets.TIINGO_KEY }}
+          REPORT_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          python -m us_etf_monitor --size 30 --out docs \
+            --session "${{ github.event.inputs.session || 'auto' }}" \
+            ${{ github.event.inputs.force == 'yes' && '--force' || '' }}
+      - name: 提交并发布（GitHub Pages 读取 docs 目录）
+        run: |
+          git config user.name "us-etf-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet || (git commit -m "report: $(TZ=America/New_York date '+%F %H:%M ET')" && git push)
