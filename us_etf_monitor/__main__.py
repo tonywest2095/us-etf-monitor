@@ -30,9 +30,16 @@ def notify(text: str):
         return
     try:
         import requests
-        requests.post(hook, json={"msg_type": "text", "content": {"text": text}}, timeout=10)
+        r = requests.post(hook, json={"msg_type": "text", "content": {"text": text}}, timeout=10)
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        code = body.get("code", body.get("StatusCode", 0))
+        if r.status_code != 200 or code not in (0, None):
+            # 飞书出错时 HTTP 仍是 200，要看返回的 code：19021 = 签名校验失败，19024 = 关键词不匹配
+            print(f"[warn] 飞书推送失败: HTTP {r.status_code}, code={code}, msg={body.get('msg')}")
+        else:
+            print("[info] 飞书推送成功")
     except Exception as e:  # noqa: BLE001
-        print(f"[warn] 飞书推送失败: {e}")
+        print(f"[warn] 飞书推送失败: {type(e).__name__}")   # 不打印异常全文，避免带出 webhook 地址
 
 
 def write_archive_index(arch: Path):
