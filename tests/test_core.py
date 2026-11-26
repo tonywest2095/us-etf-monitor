@@ -199,7 +199,33 @@ def test_live_path_end_to_end_with_mocked_network(tmp_path, monkeypatch):
     assert (tmp_path / "archive" / "2026-11-24-close.html").exists()
     assert (tmp_path / "cache" / "SPY.csv").exists() and (tmp_path / "cache" / "_VIX.csv").exists()
     assert calls[0][1] == C.HISTORY_START
-    assert M.main(["--out", str(tmp_path), "--size", "10"]) == 0          # 同一时段第二次：跳过
+    assert M.main(["--out", str(tmp_path), "--size", "10"]) == 0          # 同一时段第二次：取数前就跳过
+    assert len(calls) == 1
+    assert M.main(["--out", str(tmp_path), "--size", "10", "--force"]) == 0
     assert calls[-1][1] != C.HISTORY_START                                # 有缓存后只拉增量
     st = (tmp_path / "sim" / "state.json").read_text()
     assert '"last_decide": "2026-11-24"' in st
+
+
+def test_tiingo_cache_incremental_and_refetch_on_dividend(tmp_path, monkeypatch):
+    idx = pd.bdate_range(end="2026-11-24", periods=60)
+    def rows(dates, div_on=None, scale=1.0):
+        return [dict(date=d.strftime("%Y-%m-%dT00:00:00.000Z"), adjOpen=10 * scale, adjHigh=11 * scale,
+                     adjLow=9 * scale, adjClose=10 * scale, adjVolume=100,
+                     divCash=0.5 if d == div_on else 0, splitFactor=1) for d in dates]
+    calls = []
+    def fake(code, start):
+        calls.append(start)
+        if start == C.HISTORY_START:
+            return data.parse_tiingo(rows(idx if len(calls) == 1 else idx2, scale=1.0 if len(calls) == 1 else 0.95))
+        return data.parse_tiingo(rows([d for d in idx2 if d >= pd.Timestamp(start)], div_on=div_on))
+    monkeypatch.setattr(data, "fetch_yf_batch", lambda codes, start: {})
+    monkeypatch.setattr(data, "fetch_tiingo", fake)
+    monkeypatch.setattr(data, "fetch_stooq", lambda c, s: (_ for _ in ()).throw(data.DataError("x")))
+    idx2, div_on = pd.bdate_range(end="2026-11-25", periods=61), None
+    data.fetch_all(["XLE"], tmp_path, None)                 # 首次：整段
+    data.fetch_all(["XLE"], tmp_path, None)                 # 第二次：只拉增量
+    assert calls[0] == C.HISTORY_START and calls[1] != C.HISTORY_START and len(calls) == 2
+    div_on = idx2[-1]                                        # 增量里出现分红 -> 整段重拉
+    out, src, _ = data.fetch_all(["XLE"], tmp_path, None)
+    assert calls[-1] == C.HISTORY_START and src["XLE"] == "tiingo"

@@ -83,12 +83,20 @@ def main(argv=None) -> int:
         session = "close"
     print(f"[info] 美东 {now:%Y-%m-%d %H:%M}，时段 {session}（{why}）")
 
+    # 先判断这一时段是否已经出过报告，出过就不取数，省数据源额度
+    today = now.date()
+    if not a.demo and not a.force:
+        after_close = now.hour * 60 + now.minute >= data.close_minute(today)
+        expect = today if session == "mid" else data.last_session(today, after_close)
+        if (out / "archive" / f"{expect}-{session}.html").exists():
+            print(f"[skip] {expect} {session} 报告已生成过")
+            return 0
+
     pool = C.pool_for(a.size)
     codes = [p["code"] for p in pool]
     extra = [c for c in (C.BENCHMARK["code"], C.SIM_BENCH_6040[0], C.SIM_BENCH_6040[1], C.VIX_CODE) if c not in codes]
     need = codes + list(dict.fromkeys(extra))
 
-    today = now.date()
     if a.demo:
         raw = {c: data.demo_history(c, i) for i, c in enumerate(need)}
         sources, problems = {c: "demo" for c in raw}, []

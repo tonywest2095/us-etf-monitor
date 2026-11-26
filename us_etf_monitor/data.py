@@ -70,6 +70,16 @@ def close_minute(d: date) -> int:
     return t.hour * 60 + t.minute
 
 
+def last_session(d: date, include_today: bool) -> date:
+    """d 当天（include_today=True 时）或之前最近的一个交易日。"""
+    x = d if include_today else d - pd.Timedelta(days=1).to_pytimedelta()
+    for _ in range(10):
+        if is_session(x):
+            return x
+        x = x - pd.Timedelta(days=1).to_pytimedelta()
+    return x
+
+
 def session_open_bj(d: date) -> str:
     """某交易日 9:30 ET 开盘对应的北京时间，如 "11-27 周五 22:30"（夏令时）/ "23:30"（冬令时）。"""
     t = datetime(d.year, d.month, d.day, 9, 30, tzinfo=NY).astimezone(BJ)
@@ -133,7 +143,8 @@ def parse_yf_frame(df: pd.DataFrame) -> pd.DataFrame:
 def parse_tiingo(rows: list) -> pd.DataFrame:
     """Tiingo daily prices JSON。用 adj* 字段（Tiingo 已含拆股与全额分红复权），div 记 0 不再二次复权。"""
     recs = [dict(date=r["date"][:10], open=r.get("adjOpen"), high=r.get("adjHigh"), low=r.get("adjLow"),
-                 close=r.get("adjClose"), volume=r.get("adjVolume") or r.get("volume"), div=0.0)
+                 close=r.get("adjClose"), volume=r.get("adjVolume") or r.get("volume"),
+                 div=float(r.get("divCash") or 0) + abs(float(r.get("splitFactor") or 1) - 1))
             for r in rows or []]
     if not recs:
         return _clean(pd.DataFrame())
@@ -275,8 +286,21 @@ def fetch_all(codes: list[str], cache_dir: Path | None, want: date | None):
             if s_name not in C.SOURCES:
                 continue
             try:
-                # 这两个源给的是已复权价，不能和缓存里的原始价拼接，所以整段拉取、整段替换
-                full = fn(c, C.HISTORY_START)
+                # 备用源给的是已复权价，单独缓存（cache/<源>/）。有缓存就只拉最近 10 天；
+                # 增量里出现分红或拆股（复权价会整体变化）时才整段重拉
+                sub = cache_dir / s_name if cache_dir else None
+                old = load_cache(sub, c)
+                full = None
+                if old is not None and len(old) > 30:
+                    inc = fn(c, old.index[-10].strftime("%Y-%m-%d"))
+                    if len(inc) and inc["div"].iloc[1:].sum() == 0 and \
+                            abs(inc["close"].iloc[0] / old["close"].get(inc.index[0], np.nan) - 1) < 1e-4:
+                        full = merge(old, inc)
+                if full is None:
+                    full = fn(c, C.HISTORY_START)
+                if sub is not None and len(full):
+                    sub.mkdir(parents=True, exist_ok=True)
+                    full.assign(div=0.0).to_csv(_cache_path(sub, c))
                 if len(full) == 0:
                     continue
                 if c not in raw or full.index[-1] > raw[c].index[-1]:
