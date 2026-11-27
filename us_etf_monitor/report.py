@@ -531,9 +531,9 @@ def text_summary(res: dict, info: dict, url: str = "") -> str:
     L = [(r, s) for r in rows for s in r["buy"] if s["kind"] == "left"]
     R = [(r, s) for r in rows for s in r["buy"] if s["kind"] == "right"]
     S = [r for r in rows if r["sell"]]
-    lines.append("左侧低吸：" + ("、".join(f"{r['name']}{r['code']}(RSI {r['rsi']:.0f})" for r, _ in L) or "无"))
-    lines.append("右侧启动：" + ("、".join(f"{r['name']}{r['code']}(量比 {r['vol_ratio']:.1f})" for r, _ in R) or "无"))
-    lines.append("高抛提示：" + ("、".join(f"{r['name']}{r['code']}({'/'.join(x['title'] for x in r['sell'])})" for r in S) or "无"))
+    lines.append("左侧低吸：" + ("、".join(f"{r['name']} {r['code']}（RSI {r['rsi']:.0f}）" for r, _ in L) or "无"))
+    lines.append("右侧启动：" + ("、".join(f"{r['name']} {r['code']}（量比 {r['vol_ratio']:.1f}）" for r, _ in R) or "无"))
+    lines.append("高抛提示：" + ("、".join(f"{r['name']} {r['code']}（{'/'.join(x['title'] for x in r['sell'])}）" for r in S) or "无"))
     if url:
         lines.append(url)
     return "\n".join(lines)
