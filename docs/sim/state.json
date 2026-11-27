@@ -16,6 +16,16 @@
    "bench": 1.0,
    "ew": 1.0,
    "intraday": false
+  },
+  {
+   "date": "2026-11-27",
+   "equity": 100000,
+   "cash": 100000,
+   "m6040": 1.00176,
+   "pos": 0.0,
+   "bench": 1.00887,
+   "ew": 1.01335,
+   "intraday": true
   }
  ],
  "base": {
